@@ -1,0 +1,176 @@
+﻿
+
+@{
+    ViewData["Title"] = "Code Challenge";
+}
+
+
+
+<h1>Run C# Code in Monaco Editor</h1>
+<!-- Monaco Editor Container -->
+<form id="codeForm" onsubmit="submitCode(event)">
+    <div id="monaco-editor"></div>
+    <input type="hidden" id="code-input" name="code">
+    <button type="submit">Run Code</button>
+</form>
+
+<!-- Results List -->
+<ul id="result">
+    <li>
+        <div class="test-case">Test case 1: Input: (1, 2) | Expected: 3</div>
+        <p></p> <!-- Placeholder for output -->
+    </li>
+    <li>
+        <div class="test-case">Test case 2: Input: (4, 5) | Expected: 9</div>
+        <p></p> <!-- Placeholder for output -->
+    </li>
+    <li>
+        <div class="test-case">Test case 3: Input: (0, -1) | Expected: -1</div>
+        <p></p> <!-- Placeholder for output -->
+    </li>
+</ul>
+
+    <script src="~/microsoft/signalr/dist/browser/signalr.js"></script>
+    <!-- Include Monaco Editor JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.22.3/min/vs/loader.min.js"></script>
+    <script>
+
+
+        // SignalR connection
+        var connection = new signalR.HubConnectionBuilder()
+            .withUrl("/editorhub")
+            .build();
+
+        console.log("sdf");
+
+        // Start SignalR connection
+        connection.start()
+            .then(() => console.log("Connected to EditorHub"))
+            .catch(err => console.error(err.toString()));
+
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.22.3/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            var editor = monaco.editor.create(document.getElementById('monaco-editor'), {
+                value: "// Type your code here...\n",
+                language: 'csharp',
+                theme: 'vs-dark'
+            });
+
+        let isUpdatingFromRemote = false;
+
+  
+
+        connection.on("ReceiveCodeUpdate", function (text) {
+            const currentValue = editor.getValue();
+
+            // Check if the received text is different from the current value
+            if (text !== currentValue) {
+                isUpdatingFromRemote = true;  // Set flag to avoid recursive updates
+                editor.setValue(text);      // Set the new value in the editor
+                isUpdatingFromRemote = false; // Reset the flag after updating
+            }
+        });
+
+            // Broadcast changes when user types in the editor
+
+
+
+        editor.onDidChangeModelContent((event) => {
+            if (isUpdatingFromRemote) {
+                // Skip if the update came from a remote source
+                return;
+            }
+
+            // Get the current value from the editor
+            var text = editor.getValue();
+
+            // Send the updated code to the server
+            connection.invoke("UpdateCode", text).catch(function (err) {
+                return console.error(err.toString());
+            });
+        });
+
+
+        connection.on("ReceiveCodeRun", function (list) {
+            console.log("ReceiveCodeRun" + list);
+            document.querySelectorAll('#result p').forEach((p) => {
+                p.innerHTML = ""; // Clear existing output
+            });
+
+            // Get result array from JSON response
+            
+
+            // Loop through each test case and append the result under each one
+            let testCases = [
+                { input: "(1, 2)", expected: 3 },
+                { input: "(4, 5)", expected: 9 },
+                { input: "(0, -1)", expected: -1 }
+            ];
+
+            testCases.forEach((testCase, index) => {
+                let output = list[index] ? list[index] : "Error"; // Get output from result
+
+                // Get the corresponding list item by index and append the result
+                let listItem = document.querySelector(`#result li:nth-child(${index + 1})`);
+                if (listItem) {
+                    listItem.querySelector('p').innerHTML = `<strong>Result: ${output}</strong>`; // Update result
+                }
+            });
+        });
+
+            // Function to submit code
+        window.submitCode = function (event) {
+            event.preventDefault(); // Prevent the form from submitting and reloading the page
+
+            const code = editor.getValue(); // Get code from Monaco editor
+            document.getElementById('code-input').value = code; // Set hidden input value
+
+            $.ajax({
+                url: "/Home/RunCode", // Controller action URL
+                method: "POST",
+                data: { "code": code }, // Send code as POST data
+                dataType: "json", // Expect JSON response
+                success: function (result) {
+                    // Clear existing outputs
+                    document.querySelectorAll('#result p').forEach((p) => {
+                        p.innerHTML = ""; // Clear existing output
+                    });
+
+                    // Get result array from JSON response
+                    result = result.result;
+
+                    // Loop through each test case and append the result under each one
+                    let testCases = [
+                        { input: "(1, 2)", expected: 3 },
+                        { input: "(4, 5)", expected: 9 },
+                        { input: "(0, -1)", expected: -1 }
+                    ];
+
+                    testCases.forEach((testCase, index) => {
+                        let output = result[index] ? result[index] : "Error"; // Get output from result
+
+                        // Get the corresponding list item by index and append the result
+                        let listItem = document.querySelector(`#result li:nth-child(${index + 1})`);
+                        if (listItem) {
+                            listItem.querySelector('p').innerHTML = `<strong>Result: ${output}</strong>`; // Update result
+                        }
+                    });
+
+                    connection.invoke("RunCode", result).then(function () {
+                        console.log("Invoke RunCode" + result);
+                    }).catch (function (err) {
+						return console.error(err.toString());
+					});
+                },
+                error: function (error) {
+                    console.error(error);
+                    document.getElementById('result').innerHTML = "An error occurred while running the code.";
+                }
+            });
+        };
+
+
+
+        });
+    </script>
+
